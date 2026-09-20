@@ -75,35 +75,65 @@ Detail goes in a skill. The prompt says *when* to load it, the skill says *how*.
 
 ## Testing a change
 
-There is no test suite. There is a repeatable manual run, and it catches the
-things that actually break:
+There is no test suite. There is one script, and it runs the whole procedure:
 
 ```sh
-export OM_HOME=$(mktemp -d)
-bash -n bin/*.sh bin/omni-mate install.sh              # syntax
-
-# the bundle and every rendered crewmate must parse, and every policy resolve
-python -c "from pathlib import Path; from omnigent.spec.parser import parse; \
-           print(parse(Path('agents/omni-mate')).name)"
-
-# then, against a throwaway git repo with an origin:
-bin/om-project.sh add <repo> --mode direct-PR
-bin/om-task.sh new <proj> ship smoke-test
-bin/om-teardown.sh t001 --check      # unlanded  -> refuses
-#   commit, push, then:
-bin/om-teardown.sh t001              # landed    -> removes, archives meta
+bash bin/om-selftest.sh
 ```
 
-Use the omnigent tool's own interpreter for the parse check — the repository
-has no Python environment of its own.
+It takes no arguments, asks nothing, and exits 0 only when every check passed;
+otherwise the summary names which ones failed and what they saw. Three phases:
 
-Verify a policy actually resolves rather than assuming the path is right:
+1. **Syntax** — `bash -n` over every shell artifact the repository carries,
+   discovered rather than listed, so a script added tomorrow is covered today.
+2. **Bundle** — the agent spec and every crewmate template parse (the templates
+   are rendered first; raw `{{PLACEHOLDER}}` markers are not valid YAML), and
+   every policy the *parsed* specs name is imported and called, because a path
+   that merely looks plausible is not a path that resolves.
+3. **Lifecycle** — `om-project.sh add` → `om-task.sh new` → `om-teardown.sh`
+   end to end against a throwaway repo with a real origin, asserting the
+   invariants above: `base` is a plain branch name and never `origin/<branch>`,
+   `config_path` is a directory holding `config.yaml`, and the rendered
+   `os_env.cwd` is the worktree that was cut.
 
-```python
-import importlib
-mod, _, fn = path.rpartition(".")
-getattr(importlib.import_module(mod), fn)(**arguments)   # raises if wrong
-```
+   Teardown's two entry points behave differently on purpose, and the script
+   asserts both halves — an earlier version of this section claimed `--check`
+   refuses, and it does not:
+
+   | invocation | on unlanded work |
+   | --- | --- |
+   | `om-teardown.sh <id> --check` | reports `verdict=unlanded` on stdout, exits **0**, changes nothing |
+   | `om-teardown.sh <id>` | exits **3** with a `REFUSED:` block on stderr, worktree left intact |
+
+   Push the branch, and that same plain invocation removes the worktree and
+   archives the task meta.
+
+The run is hermetic. It exports an `OM_HOME` of its own into a temp directory,
+keeps every throwaway repo there, and removes the lot on exit — including on
+failure and on interrupt. That is not tidiness: `bin/om-lib.sh` falls back to
+the code root when `OM_HOME` is unset, so a self-test that inherited the
+environment would register its fake project and cut its worktrees inside the
+live fleet. The run's closing check fingerprints the code root before the
+first phase and again after the last, so a stray write into the operator's
+own fleet fails the run instead of passing unnoticed.
+
+Phase 2 runs on omnigent's own interpreter — the repository has no Python
+environment of its own. The path is derived at runtime, never hardcoded: resolve
+`command -v omnigent` through its symlinks, read the interpreter out of its
+shebang, and fall back to the `python` beside it. Each candidate has to actually
+`import omnigent` before it is used, so a plausible-looking interpreter that
+cannot see the package is rejected rather than trusted. If none can, phase 2
+fails loudly and names what is missing rather than skipping.
+
+What the script does not cover, and still needs a human:
+
+- Anything about a **live session**: that `sys_timer_set` fires into an idle
+  session, that a crewmate launched with `sys_session_create(config_path=…)`
+  really lands in its own worktree, that away mode alerts reach a channel.
+  These need a running agent and a real forge or messenger; the script asserts
+  the *configuration* that makes them possible, not the behaviour.
+- `bin/om-alert.sh`'s exit codes against a channel that is actually configured.
+- Whether a prompt change is an improvement. No script adjudicates meaning.
 
 ## Conventions
 
