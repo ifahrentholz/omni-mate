@@ -88,7 +88,11 @@ om_next_id() {
 om_meta_get() {
   local id="$1" key="$2" file="$OM_STATE/$1.meta"
   [ -f "$file" ] || return 1
-  sed -n "s/^${key}=//p" "$file" | head -1
+  # tail -1, not head -1. om_meta_set rewrites in place, so a well-formed
+  # record holds each key once — but anything that appends instead (a hand
+  # edit, an agent with a file tool) leaves the older value on top, and a
+  # reader that takes the first one silently reports stale state. Last wins.
+  sed -n "s/^${key}=//p" "$file" | tail -1
 }
 
 om_meta_set() {

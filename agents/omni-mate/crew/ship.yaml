@@ -1,7 +1,6 @@
 # Ship crewmate — TEMPLATE, rendered per task by bin/om-task.sh.
 #
-# Placeholders ({{TASK_ID}}, {{WORKTREE}}, {{PROJECT}}, {{BRANCH}},
-# {{GATE_PUSHES}}) are substituted into state/crew/<id>.yaml, which the first
+# Placeholders ({{TASK_ID}}, {{WORKTREE}}, {{PROJECT}}, {{BRANCH}}) are substituted into state/crew/<id>.yaml, which the first
 # mate launches with sys_session_create(config_path=...). The rendered cwd is
 # what gives this crewmate a worktree of its own: sys_session_send cannot set a
 # working directory, so a per-task config is the only way to place a worker
@@ -53,18 +52,28 @@ guardrails:
           deny_reason: >-
             Task {{TASK_ID}} writes only inside its own worktree. Report what
             you wanted to change outside it instead of reaching for it.
-    # gate_pushes is rendered from the project's delivery mode: false where the
-    # mode expects this crewmate to push its task branch and open a PR, true
-    # for local-only projects, where a push must stop and ask. The catastrophic
-    # set — force-push, rm -rf /, hard reset to a remote ref — is denied either
-    # way, and `gh pr merge` is the first mate's call, never this crewmate's.
+    # gate_pushes: false, for every delivery mode — and this was measured, not
+    # assumed. An earlier version rendered `true` for local-only projects to
+    # make "do not push" structural. But the flag does not gate pushes alone:
+    # it gates the whole recoverable-but-outward class, `rm -rf <path>`
+    # included, and returns ASK. A crewmate is unattended by design — hard rule
+    # 4 says it never addresses the captain — so an ASK is not a question, it
+    # is a wedge. The first run of a local-only task stalled on exactly that:
+    # `rm -rf` of the worker's OWN mktemp directory, routine work inside a
+    # disposable worktree, waiting on an approval nobody was there to give.
+    #
+    # What stays enforced is the catastrophic set, which needs no human:
+    # force-push, `rm -rf /`, and hard reset to a remote ref are denied
+    # outright. "Do not push" on a local-only project lives in the brief, and
+    # `gh pr merge` is the first mate's call under its own ASK gate — where a
+    # human IS present to answer.
     blast_radius:
       type: function
       on: [tool_call]
       function:
         path: omnigent.policies.builtins.orchestration.blast_radius
         arguments:
-          gate_pushes: {{GATE_PUSHES}}
+          gate_pushes: false
 
 prompt: |
   You are a ship crewmate on task {{TASK_ID}}, working project {{PROJECT}} in

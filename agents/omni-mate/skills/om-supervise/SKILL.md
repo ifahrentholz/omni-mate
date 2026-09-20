@@ -41,6 +41,37 @@ crewmate reporting `blocked` whose branch is pushed and green may have.
 | a question its brief answers | The brief was thin. Steer once with the answer; fix the brief file so the next crewmate does not ask again. |
 | a question only the captain can answer | Escalate it, alone, as one decision. |
 
+## A crewmate blocked on an approval
+
+A wake reading `[System: sub-agent <title> is blocked awaiting human approval:
+…]` is its own case, and the one kind of crewmate problem you cannot solve.
+A policy returned ASK, and only the captain can answer it — the crewmate is
+frozen until they do, and it will stay frozen indefinitely.
+
+Escalate it immediately, even in quiet mode, and make it answerable:
+
+- **Name the command and why it tripped**, in one line. Read the approval text;
+  do not paraphrase it into vagueness.
+- **Say where they answer it**: the crewmate's own terminal in the Subagents
+  panel, under the task's title.
+- **Give your reading.** You provisioned the task and wrote the brief, so say
+  whether this is routine for the work or genuinely out of scope.
+
+      **⚠ t002 steht, captain** — der Blast-Radius-Guard verlangt eine Freigabe.
+
+      - `rm -rf` auf dem eigenen `mktemp`-Verzeichnis des Crewmates
+      - Geschrieben wird ausschließlich unterhalb davon — aus meiner Sicht
+        harmlos und für die Aufgabe nötig
+
+      **Freigeben?** Im Subagents-Panel unter `t002-selftest-script`.
+
+      [freigeben / Task ohne diesen Schritt neu aufsetzen]
+
+If the same gate trips repeatedly across tasks, the policy is wrong for that
+kind of work, not the crewmate. Say so, and treat it as a change to propose —
+a captain approving the same command every twenty minutes is a design defect
+being paid for by hand.
+
 ## Steering a live crewmate
 
 ```
@@ -64,10 +95,27 @@ files, asking the same thing twice, or unreachable.
 2. `sys_session_get_history` — once. Read what it is actually doing.
 3. Decide, and say which you picked and why:
    - **Steer** — it is confused about something you can state in a sentence.
-   - **Close and re-dispatch** — `sys_session_close`, then a fresh crewmate
-     into the SAME worktree with the same brief plus a note on what the last
-     attempt did. Never provision a second worktree for one task: that splits
-     the work across two copies and loses half of it.
+   - **Close and re-dispatch** — but in that order, and prove the first half
+     happened. `sys_session_close` the old crewmate, confirm with
+     `sys_session_list` that it is gone, and only then launch a fresh one into
+     the SAME worktree with the same brief plus a note on what the last attempt
+     did.
+
+     **One worktree, one live crewmate — always.** Two writers in one worktree
+     is the worst failure this system has, because it does not look like a
+     failure: both workers succeed, and one silently overwrites the other's
+     file between its own edit and its own commit. It has happened here. A
+     crewmate that is merely *quiet* is not gone; only a confirmed close is.
+     If you cannot confirm the close, report that to the captain and stop —
+     a stalled task is recoverable, a task with two authors may not be.
+
+     And never provision a SECOND worktree for one task either: that splits the
+     work across two copies and loses half of it. The task's worktree is the
+     one recorded in its meta, for its whole life.
+
+     After a successful relaunch, record the new id — `bin/om-task.sh set <id>
+     session <new_conversation_id>` — so the record names the crewmate that is
+     actually alive.
    - **Report it** — a ship crewmate is a real terminal, and the captain can
      open it in the Subagents panel and take over. Say so plainly when that is
      the honest next step.

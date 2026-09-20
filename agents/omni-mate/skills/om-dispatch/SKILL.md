@@ -113,12 +113,16 @@ and taken over.
 Record what comes back:
 
 ```sh
-bin/om-task.sh show <id>   # then write the conversation_id into state/<id>.meta
+bin/om-task.sh set <id> session <conversation_id>
+bin/om-task.sh set <id> state running
 ```
 
-Write `session=<conversation_id>` and `state=running` into the task's meta with
-your file tool. Without the conversation id you cannot steer the crewmate and
-cannot read its history, and after a restart you will not know it exists.
+Use the script, never your file tool. The record is a flat key=value file and
+`set` rewrites a key in place; appending by hand leaves two `state=` lines and
+the next reader has to guess which is current. Mechanics belong to scripts.
+
+Without the conversation id you cannot steer the crewmate and cannot read its
+history, and after a restart you will not know it exists.
 
 ## Fanning out
 

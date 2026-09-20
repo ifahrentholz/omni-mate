@@ -124,11 +124,16 @@ mate wakes itself on a slow heartbeat, looks for the things that produce no
 event of their own — a wedged crewmate, a PR gone red, an external wait that
 never cleared — and reaches you out of band when one of them cannot wait.
 
-**One boundary, and it is a real one: the session has to stay open.** A timer
-fires into a live conversation, so leaving the terminal open is what keeps away
-mode armed. Ending the session ends the heartbeat with it. (Verified both ways:
-a timer fires reliably in a live, idle session; a session closed by a headless
-`-p` run takes its timers with it.)
+**One boundary: the session has to stay alive — which is not the same as
+keeping a terminal in front of you.** A timer fires into a live conversation.
+Measured: a timer fires reliably in a live, idle session; a session that a
+headless `-p` run ends takes its pending timers with it. Disconnecting an
+interactive REPL is a third case and a kinder one — with `omnigent start`
+running a host daemon, the session and its crewmates keep going without the
+terminal (observed: a crewmate finished its work and committed four minutes
+after its REPL was killed). Whether a timer still fires across that
+disconnect is not something this setup has measured, so away mode assumes the
+conservative reading and `/afk` does not promise more.
 
 An empty fleet gets no heartbeat at all — nothing can fail quietly when
 nothing is running. Work finishing never needs the heartbeat — Omnigent wakes the first mate the

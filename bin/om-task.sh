@@ -4,6 +4,7 @@
 #   om-task.sh new <project> <ship|scout> <slug>   allocate id, worktree, crew config
 #   om-task.sh list                                 one row per live task
 #   om-task.sh show <id>                            the task's full record
+#   om-task.sh set <id> <key> <value>               update one mutable field
 #
 # `new` is the only way a crewmate comes into existence, and it is deliberately
 # deterministic: it allocates the id, cuts a disposable worktree off a fresh
@@ -65,16 +66,13 @@ cmd_new() {
 
   mkdir -p "$OM_DATA/$id"
 
-  # The delivery mode decides whether this crewmate may push its own branch.
-  # local-only projects gate every outward command; the rest expect a task
-  # branch and a PR, which is the crewmate's finish line, not a merge.
-  local mode gate_pushes
+  # The delivery mode is recorded and goes into the brief, which is where
+  # "do not push" is enforced for a local-only project. It deliberately does
+  # NOT change the crewmate's policy any more: see the blast_radius comment in
+  # crew/ship.yaml for why an ASK gate wedges an unattended worker.
+  local mode
   mode="$("$OM_CODE_ROOT/bin/om-project.sh" mode "$project" 2>/dev/null || echo direct-PR)"
   [ -n "$mode" ] || mode="direct-PR"
-  case "${mode%+yolo}" in
-    local-only) gate_pushes=true ;;
-    *) gate_pushes=false ;;
-  esac
 
   local tmpl="$OM_CODE_ROOT/agents/omni-mate/crew/$kind.yaml"
   [ -f "$tmpl" ] || om_die "missing crew template: $tmpl"
@@ -88,7 +86,6 @@ cmd_new() {
       -e "s#{{WORKTREE}}#$wt#g" \
       -e "s#{{PROJECT}}#$project#g" \
       -e "s#{{BRANCH}}#$branch#g" \
-      -e "s#{{GATE_PUSHES}}#$gate_pushes#g" \
       "$tmpl" > "$out"
 
   om_meta_set "$id" id "$id"
@@ -132,6 +129,18 @@ cmd_list() {
   done
 }
 
+cmd_set() {
+  local id="${1:-}" key="${2:-}" value="${3:-}"
+  [ -n "$id" ] && [ -n "$key" ] || om_die "usage: om-task.sh set <id> <key> <value>"
+  [ -f "$OM_STATE/$id.meta" ] || om_die "unknown task: $id"
+  case "$key" in
+    id|kind|project|slug|branch|base|base_ref|worktree|config|created)
+      om_die "$key is set at provisioning and is not yours to change" ;;
+  esac
+  om_meta_set "$id" "$key" "$value"
+  echo "$id $key=$value"
+}
+
 cmd_show() {
   local id="${1:-}"
   [ -n "$id" ] || om_die "usage: om-task.sh show <id>"
@@ -143,5 +152,6 @@ case "${1:-}" in
   new) shift; cmd_new "$@" ;;
   list) shift; cmd_list "$@" ;;
   show) shift; cmd_show "$@" ;;
+  set) shift; cmd_set "$@" ;;
   *) sed -n '2,20p' "$0"; exit 1 ;;
 esac

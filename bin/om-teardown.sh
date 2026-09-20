@@ -71,8 +71,14 @@ else
   # Commits that live only here: on the branch, reachable from neither the
   # upstream base nor the branch's own remote.
   if git -C "$wt" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+    # Somewhere-other-than-here is what makes work safe to remove, and there
+    # are three somewheres. The LOCAL base branch counts: a local-only project
+    # delivers by merging into it, and after that the worktree holds no copy of
+    # anything. Leaving it out made every local-only task permanently
+    # un-tearable — the work had landed exactly as its mode intended, and the
+    # test still called it unlanded because no remote had heard of it.
     haverefs=""
-    for ref in "origin/$base" "origin/$branch"; do
+    for ref in "$base" "origin/$base" "origin/$branch"; do
       if git -C "$wt" rev-parse --verify --quiet "$ref" >/dev/null 2>&1; then
         haverefs="$haverefs ^$ref"
       fi
@@ -81,8 +87,9 @@ else
       # shellcheck disable=SC2086
       orphans="$(git -C "$wt" rev-list --count HEAD $haverefs 2>/dev/null || echo 0)"
     else
-      orphans="$(git -C "$wt" rev-list --count HEAD "^$base" 2>/dev/null || echo 0)"
-      [ "$orphans" != "0" ] && add_reason "no upstream ref to compare against (origin/$base, origin/$branch both absent)"
+      # Not even the base resolves. Nothing can be proven safe, so nothing is.
+      orphans="$(git -C "$wt" rev-list --count HEAD 2>/dev/null || echo 0)"
+      add_reason "no ref to compare against ($base, origin/$base, origin/$branch all absent)"
     fi
     if [ "$orphans" != "0" ]; then
       verdict=unlanded

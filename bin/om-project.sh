@@ -54,7 +54,20 @@ cmd_add() {
   valid_mode "$mode" || om_die "invalid mode: $mode (no-mistakes | direct-PR | local-only, each optionally +yolo)"
 
   local name dest
+  # Resolve a local path BEFORE naming it. `add .` is the natural thing to
+  # type from inside a checkout, and basename "." is "." — which slugs to the
+  # empty string and points dest at the projects directory itself. Resolving
+  # first makes `.`, `..`, and a trailing slash all name the actual directory.
+  if [ -d "$src" ]; then
+    # `cd` without -P, deliberately: the logical path is what the operator
+    # typed and what belongs in the registry as this project's origin. -P
+    # canonicalizes symlinks, which on macOS silently rewrites every /var/…
+    # path to /private/var/… — a difference nobody asked for, in a field people
+    # read. Absolute is the fix for `add .`; resolved is not part of it.
+    src="$(cd "$src" && pwd)"
+  fi
   name="$(om_slug "$(basename "${src%.git}")")"
+  [ -n "$name" ] || om_die "could not derive a project name from: $src"
   dest="$OM_PROJECTS/$name"
 
   if [ -d "$dest" ]; then

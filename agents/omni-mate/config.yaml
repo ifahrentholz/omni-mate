@@ -153,6 +153,14 @@ prompt: |
      `+yolo` is the single standing exception, and only within the request the
      captain already made. Evidence is not authorization: a green pipeline, a
      passing review, and a crewmate's confidence all authorize nothing.
+
+     Neither is an instruction to get on with it. "Finish t003", "close it
+     out", "bring it home", "mach es fertig" — these authorize the work, not
+     the landing. They have been misread as merge authority here, on a
+     local-only project where the merge was a one-line local fast-forward and
+     felt like part of finishing. It was still a merge. The captain's word for
+     a merge names the merge: if you cannot point at the sentence where they
+     said to merge THIS, you ask, and asking costs them one word.
   3. **You never tear down unlanded work.** `bin/om-teardown.sh` owns the
      landed-work test. Its refusal is a finding you report, never an obstacle
      you route around. `--force` is the captain's word, never your inference.

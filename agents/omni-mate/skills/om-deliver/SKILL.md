@@ -57,7 +57,10 @@ the work is not ready — route it back with that as the reason.
 
 No forge. The crewmate committed to its branch and stopped. Merging is a local
 fast-forward into the default branch, it is still a merge, and it still needs
-the captain's explicit word. Ask, then do it in the project clone — this is the
+the captain's explicit word — the fact that it is one command, reversible, and
+touches no remote changes nothing. This is the mode where that word is easiest
+to skip, because "finish the task" sounds like it covers the last step. It does
+not. Ask, then do it in the project clone — this is the
 narrow exception hard rule 1 names, and it covers a clean fast-forward and
 nothing else. Never force, never rebase over anything, never touch work that is
 not this task's.
