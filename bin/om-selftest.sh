@@ -212,7 +212,10 @@ list_shell_artifacts() {
   # system bash on macOS — can lose its place in the script when it does. A
   # plain redirect has no such failure mode, and the -z pairing keeps paths with
   # spaces intact.
-  git -C "$OM_CODE_ROOT" ls-files -z -co --exclude-standard > "$TMPROOT/.tracked"
+  # `|| true` so a git that cannot read this tree reports as "discovered none"
+  # below, with a summary line, rather than aborting under `set -e` and leaving
+  # the run with no summary at all.
+  git -C "$OM_CODE_ROOT" ls-files -z -co --exclude-standard > "$TMPROOT/.tracked" || true
   while IFS= read -r -d '' f; do
     [ -f "$OM_CODE_ROOT/$f" ] || continue
     case "$f" in
