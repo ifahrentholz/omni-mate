@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# om-lib.sh — shared resolution for every om-*.sh script. Source it, never run it.
+#
+# Home resolution, in order:
+#   1. $OM_HOME, when set (an operator running several homes on one machine)
+#   2. the nearest ancestor of $PWD carrying a .om-home marker
+#   3. the repository this script lives in, resolved through the install symlink
+#
+# Step 2 is not a nicety, it is the load-bearing one. Omnigent's shell tool
+# passes a fixed environment allowlist through to commands — PATH, HOME, PWD
+# and friends — and OM_HOME is not on it. An agent running in a home other than
+# the checkout therefore invokes these scripts with OM_HOME unset, and without
+# a marker to find they would all quietly operate on the checkout instead:
+# cloning projects into the shared template, writing records there, and cutting
+# worktrees in the wrong place. The session's working directory IS the home, so
+# that is what we resolve from.
+#
+# A home owns data/ state/ config/ projects/ worktrees/. Scripts come from the
+# tracked code root, which is the same directory unless the home says otherwise.
+set -euo pipefail
+
+om_code_root() {
+  local src="${BASH_SOURCE[0]}" dir
+  while [ -L "$src" ]; do
+    dir="$(cd -P "$(dirname "$src")" && pwd)"
+    src="$(readlink "$src")"
+    case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+  done
+  (cd -P "$(dirname "$src")/.." && pwd)
+}
+
+OM_CODE_ROOT="$(om_code_root)"
+
+om_find_home() {
+  if [ -n "${OM_HOME:-}" ]; then
+    printf '%s' "$OM_HOME"
+    return 0
+  fi
+  local d="$PWD"
+  while [ "$d" != "/" ] && [ -n "$d" ]; do
+    if [ -f "$d/.om-home" ]; then
+      printf '%s' "$d"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  printf '%s' "$OM_CODE_ROOT"
+}
+
+OM_HOME="$(om_find_home)"
+export OM_CODE_ROOT OM_HOME
+
+OM_DATA="$OM_HOME/data"
+OM_STATE="$OM_HOME/state"
+OM_CONFIG="$OM_HOME/config"
+OM_PROJECTS="$OM_HOME/projects"
+OM_WORKTREES="$OM_HOME/worktrees"
+export OM_DATA OM_STATE OM_CONFIG OM_PROJECTS OM_WORKTREES
+
+om_ensure_home() {
+  mkdir -p "$OM_DATA" "$OM_STATE" "$OM_STATE/crew" "$OM_CONFIG" "$OM_PROJECTS" "$OM_WORKTREES"
+  # The marker is what makes this directory findable as a home from a working
+  # directory alone, with no environment to rely on.
+  [ -f "$OM_HOME/.om-home" ] || printf 'omni-mate home\n' > "$OM_HOME/.om-home"
+}
+
+om_die() { echo "${0##*/}: $*" >&2; exit 1; }
+
+# A task id is <t><NNN>-<slug>: sortable, greppable, and safe as a branch
+# segment, a directory name, and a session title all at once.
+om_slug() {
+  printf '%s' "$1" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -e 's/[^a-z0-9]\{1,\}/-/g' -e 's/^-//' -e 's/-$//' \
+    | cut -c1-40
+}
+
+om_next_id() {
+  local counter="$OM_STATE/.task-counter" n
+  n=$(cat "$counter" 2>/dev/null || echo 0)
+  n=$((n + 1))
+  printf '%s' "$n" > "$counter"
+  printf 't%03d' "$n"
+}
+
+# Reads one field out of a task's meta record. Meta is flat key=value so that
+# both bash and an agent reading the raw file get the same answer.
+om_meta_get() {
+  local id="$1" key="$2" file="$OM_STATE/$1.meta"
+  [ -f "$file" ] || return 1
+  sed -n "s/^${key}=//p" "$file" | head -1
+}
+
+om_meta_set() {
+  local id="$1" key="$2" value="$3" file="$OM_STATE/$1.meta" tmp
+  tmp="$(mktemp)"
+  if [ -f "$file" ]; then grep -v "^${key}=" "$file" > "$tmp" || true; fi
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$file"
+}
+
+om_task_ids() {
+  [ -d "$OM_STATE" ] || return 0
+  find "$OM_STATE" -maxdepth 1 -name 't[0-9][0-9][0-9]*.meta' 2>/dev/null \
+    | sed -e 's#.*/##' -e 's/\.meta$//' | sort
+}

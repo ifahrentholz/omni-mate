@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# omni-mate — board the ship.
+#
+#   omni-mate                 interactive session; you speak first
+#   omni-mate -p "..."        headless: one request, then exit
+#   OM_HOME=~/other omni-mate run a second, isolated home on this machine
+#
+# Arguments pass through to `omnigent run`. `--log` is added automatically
+# unless a prompt is present: with -p, Omnigent runs headless and rejects it.
+#
+# The session's working directory is the HOME, not wherever you typed this.
+# That is deliberate: the first mate's records, its project clones, and the
+# per-task crewmate configs it launches are all addressed relative to the home,
+# and sys_session_create resolves config_path against the session's cwd.
+set -euo pipefail
+
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  case "$src" in /*) ;; *) src="$dir/$src" ;; esac
+done
+CODE_ROOT="$(cd -P "$(dirname "$src")/.." && pwd)"
+OM_HOME="${OM_HOME:-$CODE_ROOT}"
+BUNDLE="$CODE_ROOT/agents/omni-mate"
+
+[ -f "$BUNDLE/config.yaml" ] || {
+  echo "omni-mate: no bundle at $BUNDLE — repository incomplete or moved?" >&2
+  exit 1
+}
+command -v omnigent >/dev/null 2>&1 || {
+  echo "omni-mate: 'omnigent' is not on your PATH. See https://omnigent.ai/" >&2
+  exit 1
+}
+command -v git >/dev/null 2>&1 || {
+  echo "omni-mate: 'git' is not on your PATH; the fleet cannot cut a worktree without it." >&2
+  exit 1
+}
+command -v gh >/dev/null 2>&1 || {
+  echo "omni-mate: note — 'gh' is not on your PATH. Projects in direct-PR or" >&2
+  echo "           no-mistakes mode cannot deliver until it is installed and" >&2
+  echo "           authenticated (gh auth login). local-only still works." >&2
+}
+command -v claude >/dev/null 2>&1 || {
+  echo "omni-mate: note — the 'claude' CLI is not on your PATH, so ship" >&2
+  echo "           crewmates cannot run as visible claude-native terminals." >&2
+  echo "           Switch agents/omni-mate/crew/ship.yaml to claude-sdk to run" >&2
+  echo "           them headless instead." >&2
+}
+
+mkdir -p "$OM_HOME/data" "$OM_HOME/state/crew" "$OM_HOME/config" \
+         "$OM_HOME/projects" "$OM_HOME/worktrees"
+
+# The marker the toolbelt resolves the home by. It has to exist before the
+# agent's first shell call: Omnigent does not pass OM_HOME through to tools, so
+# the marker is the only thing telling bin/om-*.sh which home they are in.
+[ -f "$OM_HOME/.om-home" ] || printf 'omni-mate home\n' > "$OM_HOME/.om-home"
+
+# The contract and every skill address the toolbelt as `bin/om-*.sh`, relative
+# to the session's working directory — which is the home. When the home IS the
+# checkout that already holds; when it is somewhere else (OM_HOME), the home
+# needs a bin/ of its own, or every documented path silently misses. A symlink
+# keeps one spelling correct in both cases, and keeps the scripts coming from
+# the tracked code root either way.
+if [ "$OM_HOME" != "$CODE_ROOT" ] && [ ! -e "$OM_HOME/bin" ]; then
+  ln -s "$CODE_ROOT/bin" "$OM_HOME/bin"
+fi
+
+export OM_HOME
+export PATH="$CODE_ROOT/bin:$PATH"
+cd "$OM_HOME"
+
+for arg in "$@"; do
+  case "$arg" in
+    -p|--prompt|-p*|--prompt=*) exec omnigent run "$BUNDLE" "$@" ;;
+  esac
+done
+exec omnigent run "$BUNDLE" --log "$@"

@@ -1,0 +1,9 @@
+# Captain-private. The repository is a shared template; everything a home
+# accumulates while sailing stays on the machine that sailed it.
+/projects/
+/worktrees/
+/data/
+/state/
+/config/
+.DS_Store
+.om-home
