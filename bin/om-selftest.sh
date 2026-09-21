@@ -19,6 +19,14 @@
 #   3. lifecycle  register a project, cut a task worktree, and prove
 #                 bin/om-teardown.sh refuses to destroy work that lives nowhere
 #                 else — the one check whose failure loses something real
+#   4. degraded   the same scripts, given input that is wrong: an option with
+#                 no value, a project nobody registered, a worktree git
+#                 disowns, a task record missing a line. Seven exit-status
+#                 defects lived through phases 1-3 untouched — the suite
+#                 reported 59/59 with every one of them present — because not
+#                 one of them is reachable from the happy path
+#   5. harness    this script's own exit status, which its EXIT trap must never
+#                 be able to rewrite
 #
 # HERMETIC, and structurally so rather than by promise. om-lib.sh falls back to
 # the repository root when OM_HOME is unset, and this repository root doubles as
@@ -70,6 +78,11 @@ mkdir -p "$OM_HOME"
 # and om_die.
 # shellcheck source=om-lib.sh
 . "$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/om-lib.sh"
+
+# This file's own path, absolute and resolved once, because phase 5 reads the
+# cleanup() it actually ships with rather than a retyped copy of it — a copy
+# would go on passing after the original drifted back.
+SELFTEST_FILE="$(cd -P "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
 case "$OM_HOME" in
   "$TMPROOT"/*) ;;
@@ -138,6 +151,16 @@ assert_contains() { # <name> <haystack> <needle>
   case "$2" in
     *"$3"*) check_pass "$1" "$3" ;;
     *) check_fail "$1" "expected '$3' in: $(printf '%s' "$2" | tr '\n' ' ')" ;;
+  esac
+}
+
+# The other direction, and it earns its place: a script that dies half way
+# through printing its report is only distinguishable from one that finished by
+# what is NOT in the output.
+assert_lacks() { # <name> <haystack> <needle>
+  case "$2" in
+    *"$3"*) check_fail "$1" "unexpected '$3' in: $(printf '%s' "$2" | tr '\n' ' ')" ;;
+    *) check_pass "$1" "no '$3'" ;;
   esac
 }
 
@@ -533,9 +556,248 @@ print(parse(Path(sys.argv[1])).os_env.cwd)' "$OM_HOME/$cfgrel"
   assert_file "task meta archived" "$OM_STATE/archive/$id.meta"
 }
 
-# Phase 3's closing check, kept outside phase_lifecycle so it still runs when
-# that phase bailed on a failed prerequisite — a half-finished lifecycle is
-# exactly when a stray write is most likely, and least likely to be noticed.
+# ── Phase 4: degraded input ─────────────────────────────────────────────────
+# Phases 1-3 drive the happy path, and the happy path is precisely what hid the
+# seven exit-status defects 9f50f32 fixed: this suite reported 59/59 with every
+# one of them present. None of the seven is reachable without input that is
+# wrong — an option with no value, a project nobody registered, a worktree git
+# disowns, a task record missing a line — so this phase supplies exactly that,
+# and asserts what each script must do with it.
+#
+# One rule runs through every check here: a script that cannot do the job says
+# so and exits non-zero. Dying silently is the defect, never the refusal — and
+# from the outside a `set -e` abort mid-function is indistinguishable from
+# "nothing to report", which is why the exit status and the words are asserted
+# separately rather than one standing in for the other.
+
+# A throwaway project of this phase's own: a bare local origin, one seed commit,
+# registered through om-project.sh. Phase 3 builds its own inline because it
+# asserts every step of the build; this phase only needs the result, and needs
+# it whether or not phase 3 got that far.
+seed_throwaway_project() { # <name>
+  local name="$1" origin="$TMPROOT/origin/$1.git" seed="$TMPROOT/seed-$1"
+  mkdir -p "$TMPROOT/origin"
+  scratch_git init --bare --quiet "$origin"
+  scratch_git --git-dir="$origin" symbolic-ref HEAD refs/heads/main
+  scratch_git init --quiet "$seed"
+  scratch_git -C "$seed" symbolic-ref HEAD refs/heads/main
+  printf '# %s\n\nThrowaway project for bin/om-selftest.sh.\n' "$name" > "$seed/README.md"
+  scratch_git -C "$seed" add -A
+  scratch_git -C "$seed" commit --quiet -m 'seed the throwaway project'
+  scratch_git -C "$seed" remote add origin "$origin"
+  scratch_git -C "$seed" push --quiet origin main
+  "$OM_CODE_ROOT/bin/om-project.sh" add "$origin" --mode direct-PR
+}
+
+phase_degraded() {
+  echo
+  echo "== phase 4: degraded input =="
+
+  local project=degraded ppath="$OM_PROJECTS/degraded"
+  run_capture seed_throwaway_project "$project"
+  if [ "$RUN_STATUS" -ne 0 ]; then
+    check_fail "phase 4's throwaway project registers" \
+      "exit $RUN_STATUS: $(printf '%s' "$RUN_ERR" | tr '\n' ' ')"
+    return 0
+  fi
+  check_pass "phase 4's throwaway project registers" "$project"
+
+  # ── om-project.sh's argument and lookup paths ─────────────────────────────
+  # `--mode` as the final argument. `shift 2` with one argument left returns
+  # non-zero and a bare shift is not ERREXIT-exempt, so the script died with
+  # rc=1 and no output at all — three lines short of the message it already
+  # carried for exactly this case. Both halves are asserted because the status
+  # alone cannot tell the two apart.
+  run_capture "$OM_CODE_ROOT/bin/om-project.sh" add "$TMPROOT/never-cloned" --mode
+  if [ "$RUN_STATUS" -ne 0 ]; then
+    check_pass "om-project.sh add --mode with no value exits non-zero" "exit $RUN_STATUS"
+  else
+    check_fail "om-project.sh add --mode with no value exits non-zero" \
+      "exited 0: $(printf '%s' "$RUN_OUT" | tr '\n' ' ')"
+  fi
+  assert_contains "om-project.sh add --mode with no value says what is missing" \
+    "$RUN_ERR" "--mode needs a value"
+
+  # The read path of `mode`, both ways round. `grep | awk` under pipefail made
+  # an unregistered name exit 1 in silence — indistinguishable from a project
+  # whose mode is empty — so the negative is asserted by its message.
+  run_capture "$OM_CODE_ROOT/bin/om-project.sh" mode "$project"
+  assert_eq "om-project.sh mode reads a registered project's mode" direct-PR "$RUN_OUT"
+
+  run_capture "$OM_CODE_ROOT/bin/om-project.sh" mode no-such-project
+  if [ "$RUN_STATUS" -ne 0 ]; then
+    check_pass "om-project.sh mode on an unregistered project exits non-zero" "exit $RUN_STATUS"
+  else
+    check_fail "om-project.sh mode on an unregistered project exits non-zero" \
+      "exited 0: $(printf '%s' "$RUN_OUT" | tr '\n' ' ')"
+  fi
+  assert_contains "om-project.sh mode on an unregistered project says so" \
+    "$RUN_ERR" "unknown project"
+
+  # A directory under projects/ that is not a clone — what an interrupted `add`
+  # leaves behind. cmd_default_branch cannot read it and dies, and `exit 1`
+  # inside `$( )` ends only the substitution's subshell: interpolated into an
+  # echo, that failure printed `default_branch=` and the script went on
+  # reporting a project it had never managed to read.
+  mkdir -p "$OM_PROJECTS/notaclone"
+  run_capture "$OM_CODE_ROOT/bin/om-project.sh" add "$TMPROOT/notaclone"
+  if [ "$RUN_STATUS" -ne 0 ]; then
+    check_pass "om-project.sh add stops when the default branch cannot be read" \
+      "exit $RUN_STATUS"
+  else
+    check_fail "om-project.sh add stops when the default branch cannot be read" \
+      "exited 0: $(printf '%s' "$RUN_OUT" | tr '\n' ' ')"
+  fi
+  assert_lacks "om-project.sh add reports no project it could not finish reading" \
+    "$RUN_OUT" "project=notaclone"
+
+  # ── A worktree git disowns ────────────────────────────────────────────────
+  # Two tasks, and their order is load-bearing: ids sort, so a script that dies
+  # on the broken one never reaches the healthy one, and the fleet check below
+  # can tell "reported it and moved on" from "stopped there".
+  local broken_id broken_wt landed_id landed_wt landed_branch
+  run_capture "$OM_CODE_ROOT/bin/om-task.sh" new "$project" ship broken-worktree
+  if [ "$RUN_STATUS" -ne 0 ]; then
+    check_fail "phase 4's tasks provision" \
+      "broken-worktree: exit $RUN_STATUS: $(printf '%s' "$RUN_ERR" | tr '\n' ' ')"
+    return 0
+  fi
+  broken_id="$(kv "$RUN_OUT" id)"
+  broken_wt="$(kv "$RUN_OUT" worktree)"
+
+  run_capture "$OM_CODE_ROOT/bin/om-task.sh" new "$project" ship landed-locally
+  if [ "$RUN_STATUS" -ne 0 ]; then
+    check_fail "phase 4's tasks provision" \
+      "landed-locally: exit $RUN_STATUS: $(printf '%s' "$RUN_ERR" | tr '\n' ' ')"
+    return 0
+  fi
+  landed_id="$(kv "$RUN_OUT" id)"
+  landed_wt="$(kv "$RUN_OUT" worktree)"
+  landed_branch="$(kv "$RUN_OUT" branch)"
+  check_pass "phase 4's tasks provision" "$broken_id, $landed_id"
+
+  # The audit's own fixture: the directory is still there and git disowns it.
+  # A clone removed from under its worktree leaves exactly this, and so does a
+  # .git file still pointing at a pruned admin directory. git exits 128,
+  # 2>/dev/null hides why, and `| wc -l` under pipefail handed that 128 to the
+  # whole script.
+  printf 'gitdir: %s\n' "$TMPROOT/no-such-git-dir" > "$broken_wt/.git"
+
+  run_capture "$OM_CODE_ROOT/bin/om-state.sh" task "$broken_id"
+  assert_eq "om-state.sh survives a worktree git cannot read" 0 "$RUN_STATUS"
+  assert_contains "om-state.sh names the unreadable worktree" "$RUN_OUT" "worktree: BROKEN"
+
+  run_capture "$OM_CODE_ROOT/bin/om-state.sh" fleet
+  assert_contains "om-state.sh fleet reports the tasks after a broken one" \
+    "$RUN_OUT" "[$landed_id]"
+
+  # The verdict a caller depends on must exist even when nothing can be proven
+  # about the worktree. It printed nothing at all and returned 128.
+  run_capture "$OM_CODE_ROOT/bin/om-teardown.sh" "$broken_id" --check
+  assert_eq "teardown --check on an unreadable worktree exits 0" 0 "$RUN_STATUS"
+  assert_contains "teardown --check prints a verdict for an unreadable worktree" \
+    "$RUN_OUT" "verdict=unlanded"
+  assert_contains "teardown --check says it could not look" \
+    "$RUN_OUT" "git cannot read this worktree"
+
+  run_capture "$OM_CODE_ROOT/bin/om-teardown.sh" "$broken_id"
+  assert_eq "plain teardown refuses an unreadable worktree" 3 "$RUN_STATUS"
+  assert_dir "the unreadable worktree is still on disk" "$broken_wt"
+
+  # ── A record missing a line ───────────────────────────────────────────────
+  # Work landed the way a local-only project lands it: merged into the clone's
+  # own main, never pushed. That is the one shape where the `base` default is
+  # what makes the landed-work test resolvable at all — origin/main does not
+  # contain the commit, and origin/<branch> does not exist.
+  printf 'work that landed locally\n' > "$landed_wt/landed.txt"
+  scratch_git -C "$landed_wt" add -A
+  scratch_git -C "$landed_wt" commit --quiet -m 'work that lands locally'
+  run_capture scratch_git -C "$ppath" merge --quiet --ff-only "$landed_branch"
+  if [ "$RUN_STATUS" -ne 0 ]; then
+    check_fail "the landed-locally branch merges into the clone's main" \
+      "exit $RUN_STATUS: $(printf '%s' "$RUN_ERR" | tr '\n' ' ')"
+    return 0
+  fi
+  check_pass "the landed-locally branch merges into the clone's main" "$landed_branch"
+
+  run_capture om_meta_get "$landed_id" kind
+  assert_eq "om_meta_get reads a key the record has" ship "$RUN_OUT"
+
+  # One line out of an otherwise valid record — a hand edit, an agent with a
+  # file tool, a write that was interrupted.
+  grep -v '^base=' "$OM_STATE/$landed_id.meta" > "$TMPROOT/.meta-without-base"
+  mv "$TMPROOT/.meta-without-base" "$OM_STATE/$landed_id.meta"
+
+  run_capture om_meta_get "$landed_id" base
+  if [ "$RUN_STATUS" -ne 0 ]; then
+    check_pass "om_meta_get fails on a key the record does not have" "exit $RUN_STATUS"
+  else
+    check_fail "om_meta_get fails on a key the record does not have" \
+      "returned 0 with '$RUN_OUT' — every '|| echo <default>' built on it is dead code"
+  fi
+  local fallback
+  fallback="$(om_meta_get "$landed_id" base || echo main)"
+  assert_eq "the || fallback every caller writes reaches its default" main "$fallback"
+
+  # The measured consequence, end to end: one missing line must not turn work
+  # that has landed into work that can never be torn down.
+  run_capture "$OM_CODE_ROOT/bin/om-teardown.sh" "$landed_id" --check
+  assert_contains "a record missing base= still reads as landed" "$RUN_OUT" "verdict=landed"
+}
+
+# ── Phase 5: the harness's own exit status ──────────────────────────────────
+# `set -e` is still in force inside an EXIT trap, so a failing command there
+# exits the shell with ITS status and overwrites the result the run had already
+# earned: measured, a green 59/59 run reported itself FAILED with rc=9 when rm
+# was forced to fail. A temp directory that survives is a mess; a false FAILED
+# is a lie, and this phase is what keeps cleanup() unable to tell one.
+#
+# The probe runs the real cleanup(), lifted out of this file at run time and
+# given an `rm` that fails. Lifting rather than retyping is the point: a copy
+# of the shape would keep passing after the shape it copied had drifted back.
+phase_harness() {
+  echo
+  echo "== phase 5: the harness's own exit status =="
+
+  local probe="$TMPROOT/trap-probe.sh" victim="$TMPROOT/trap-probe-victim"
+  local extracted="$TMPROOT/.cleanup-source"
+  mkdir -p "$victim"
+
+  # The function body starts at column 0 and ends at a `}` on its own at column
+  # 0; the `|| { … }` block inside it is indented, so the range stops in the
+  # right place.
+  sed -n '/^cleanup() {$/,/^}$/p' "$SELFTEST_FILE" > "$extracted"
+  if grep -q 'rm -rf' "$extracted"; then
+    check_pass "cleanup() lifted out of this file" \
+      "$(wc -l < "$extracted" | tr -d ' ') lines"
+  else
+    check_fail "cleanup() lifted out of this file" \
+      "no cleanup() with an rm -rf found in $SELFTEST_FILE — the probe below would prove nothing"
+    return 0
+  fi
+
+  # `rm` as a shell function, so cleanup's own `rm -rf` resolves to it and
+  # fails exactly the way a read-only parent or a vanished mount would make it
+  # fail. Nothing is removed by the probe, under any outcome.
+  {
+    echo 'set -euo pipefail'
+    echo 'rm() { return 9; }'
+    printf "TMPROOT='%s'\n" "$victim"
+    cat "$extracted"
+    echo 'trap cleanup EXIT'
+    echo 'echo body-ok'
+    echo 'exit 0'
+  } > "$probe"
+
+  run_capture bash "$probe"
+  assert_eq "a failing cleanup cannot overwrite a clean exit" 0 "$RUN_STATUS"
+  assert_contains "the trap probe ran its body" "$RUN_OUT" "body-ok"
+  assert_dir "the trap probe removed nothing" "$victim"
+}
+
+# The run's closing check, kept outside every phase so it still runs when one
+# bailed on a failed prerequisite — a half-finished lifecycle is exactly when a
+# stray write is most likely, and least likely to be noticed.
 assert_fleet_unmoved() {
   fleet_fingerprint > "$TMPROOT/.fleet-after"
   if cmp -s "$TMPROOT/.fleet-before" "$TMPROOT/.fleet-after"; then
@@ -642,6 +904,8 @@ echo "  temp home: $OM_HOME  (removed on exit)"
 phase_syntax
 phase_bundle
 phase_lifecycle
+phase_degraded
+phase_harness
 assert_fleet_unmoved
 
 echo
