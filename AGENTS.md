@@ -82,7 +82,7 @@ bash bin/om-selftest.sh
 ```
 
 It takes no arguments, asks nothing, and exits 0 only when every check passed;
-otherwise the summary names which ones failed and what they saw. Three phases:
+otherwise the summary names which ones failed and what they saw. Five phases:
 
 1. **Syntax** — `bash -n` over every shell artifact the repository carries,
    discovered rather than listed, so a script added tomorrow is covered today.
@@ -107,6 +107,22 @@ otherwise the summary names which ones failed and what they saw. Three phases:
 
    Push the branch, and that same plain invocation removes the worktree and
    archives the task meta.
+
+4. **Degraded input** — the same scripts given input that is wrong: `--mode`
+   with no value, a project nobody registered, a directory under `projects/`
+   that is not a clone, a worktree git disowns, a task record missing its
+   `base=` line. This is where the seven exit-status defects `9f50f32` fixed
+   are reachable, and the phase exists because they were not: the suite
+   reported 59/59 with all seven present. **A script that cannot do the job
+   says so and exits non-zero** — a `set -e` abort mid-function looks exactly
+   like "nothing to report" from the outside, so the exit status and the words
+   are asserted separately.
+5. **Harness** — the script's own exit status. `set -e` is in force inside an
+   EXIT trap, so a failing command there exits with *its* status and overwrites
+   the result already earned. The phase lifts `cleanup()` out of the file at
+   run time, hands it an `rm` that fails, and asserts a clean exit stays clean.
+   Lifted rather than retyped: a copy would go on passing after the original
+   drifted back.
 
 The run is hermetic. It exports an `OM_HOME` of its own into a temp directory,
 keeps every throwaway repo there, and removes the lot on exit — including on
