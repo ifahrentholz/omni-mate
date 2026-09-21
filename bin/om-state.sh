@@ -41,7 +41,22 @@ emit_task() {
       echo
       return 0
     fi
-    ahead="$(git -C "$wt" rev-list --count HEAD "^$base" 2>/dev/null || echo '?')"
+    # Try the local base, then the remote-tracking one. A clone cut while some
+    # other branch was checked out has no local `main` at all, so counting
+    # against "$base" alone printed '?' for every task in the fleet view —
+    # while om-teardown.sh, asking the same question, answered it fine because
+    # it falls back to origin/. Two views of one fact should not disagree.
+    local base_cmp=""
+    for ref in "$base" "origin/$base"; do
+      if git -C "$wt" rev-parse --verify --quiet "$ref" >/dev/null 2>&1; then
+        base_cmp="$ref"; break
+      fi
+    done
+    if [ -n "$base_cmp" ]; then
+      ahead="$(git -C "$wt" rev-list --count HEAD "^$base_cmp" 2>/dev/null || echo '?')"
+    else
+      ahead="? (no ref $base or origin/$base)"
+    fi
     if git -C "$wt" rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
       local unpushed
       unpushed="$(git -C "$wt" rev-list --count HEAD "^origin/$branch" 2>/dev/null || echo '?')"
