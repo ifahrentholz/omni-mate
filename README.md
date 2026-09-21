@@ -133,7 +133,9 @@ running a host daemon, the session and its crewmates keep going without the
 terminal (observed: a crewmate finished its work and committed four minutes
 after its REPL was killed). Whether a timer still fires across that
 disconnect is not something this setup has measured, so away mode assumes the
-conservative reading and `/afk` does not promise more.
+conservative reading and `/afk` does not promise more. The two crew harnesses
+also differ in what they survive — see
+[They do not survive the same things](#they-do-not-survive-the-same-things).
 
 An empty fleet gets no heartbeat at all — nothing can fail quietly when
 nothing is running. Work finishing never needs the heartbeat — Omnigent wakes the first mate the
@@ -235,6 +237,30 @@ To run the whole crew headless instead, change one line in
 
 ```yaml
 harness: claude-sdk   # was: claude-native
+```
+
+### They do not survive the same things
+
+Visibility is the obvious difference and not the only one. Observed, once each,
+by killing an interactive REPL mid-task:
+
+| | after the REPL is killed |
+| --- | --- |
+| `claude-native` ship crewmate | **kept working** — finished its task and committed four minutes later |
+| `claude-sdk` scout | **stopped in the same second**, with its report unwritten |
+
+The likely reason is where each one lives: a native crewmate is a terminal
+process the host daemon owns, while an SDK crewmate runs inside the runner bound
+to the session. Two observations are not a guarantee, and this has not been
+tested across Omnigent versions — but if you are dispatching long work you
+intend to walk away from, that is the asymmetry to plan around, and it is an
+argument for `claude-native` beyond being able to watch.
+
+It is also why a lost REPL is worth reconciling rather than assuming: the fleet
+view reads what is true on disk, and work may have continued without you.
+
+```bash
+bin/om-state.sh fleet
 ```
 
 ## Layout
