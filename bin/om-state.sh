@@ -33,7 +33,14 @@ emit_task() {
     echo "  worktree: GONE (${wt:-unrecorded}) — reconcile before assuming anything"
   else
     local dirty ahead pushed
-    dirty="$(git -C "$wt" status --porcelain -uall 2>/dev/null | wc -l | tr -d ' ')"
+    if ! dirty="$(om_worktree_dirty_count "$wt")"; then
+      # The directory is there and git disowns it. Say so and move on: one
+      # broken record must not stop the rest of the fleet from being reported.
+      echo "  worktree: BROKEN ($wt) — present on disk, not a git worktree"
+      echo "  reconcile this task before acting on it"
+      echo
+      return 0
+    fi
     ahead="$(git -C "$wt" rev-list --count HEAD "^$base" 2>/dev/null || echo '?')"
     if git -C "$wt" rev-parse --verify --quiet "origin/$branch" >/dev/null 2>&1; then
       local unpushed

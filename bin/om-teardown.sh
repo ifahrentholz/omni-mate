@@ -62,10 +62,18 @@ if [ -z "$wt" ] || [ ! -d "$wt" ]; then
   verdict=gone
   add_reason "no worktree on disk at ${wt:-<unrecorded>}"
 else
-  dirty="$(git -C "$wt" status --porcelain -uall 2>/dev/null | wc -l | tr -d ' ')"
-  if [ "$dirty" != "0" ]; then
+  if dirty="$(om_worktree_dirty_count "$wt")"; then
+    if [ "$dirty" != "0" ]; then
+      verdict=unlanded
+      add_reason "$dirty uncommitted or untracked file(s) in the worktree"
+    fi
+  else
+    # Git cannot read this directory, so nothing about its contents can be
+    # proven — least of all that removing it loses nothing. Fail safe: refuse,
+    # and say why. The old code aborted the whole script with status 128 here
+    # and printed no verdict at all, which a caller could not tell from silence.
     verdict=unlanded
-    add_reason "$dirty uncommitted or untracked file(s) in the worktree"
+    add_reason "git cannot read this worktree — contents unprovable, refusing to guess"
   fi
 
   # Commits that live only here: on the branch, reachable from neither the

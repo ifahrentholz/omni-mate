@@ -41,8 +41,17 @@ set -euo pipefail
 # through; this way there is exactly one `rm -rf` in the file and it is guarded.
 TMPROOT=""
 cleanup() {
+  # `|| true`, and it is not sloppiness. set -e is still in force inside an EXIT
+  # trap, so a failing rm makes the shell exit with rm's status and overwrite
+  # the result the run had already earned: measured, a green 59/59 run reported
+  # itself as a failure with rc=9 when rm was forced to fail. Cleanup is
+  # housekeeping and must never be able to change the verdict. A temp directory
+  # that survives is a mess; a false FAILED is a lie.
   if [ -n "${TMPROOT:-}" ] && [ -d "$TMPROOT" ]; then
-    rm -rf "$TMPROOT"
+    rm -rf "$TMPROOT" 2>/dev/null || {
+      printf 'note: could not remove %s — left behind\n' "$TMPROOT" >&2
+      true
+    }
   fi
 }
 trap cleanup EXIT

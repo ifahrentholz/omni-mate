@@ -46,7 +46,13 @@ cmd_add() {
   local mode="direct-PR"
   while [ $# -gt 0 ]; do
     case "$1" in
-      --mode) mode="${2:-}"; shift 2 ;;
+      # `shift 2` with --mode last returns non-zero, and a bare shift is not
+      # ERREXIT-exempt: the script died with rc=1 and no output at all, instead
+      # of reaching the "invalid mode" message three lines down. Check the
+      # argument is there, and say so when it is not.
+      --mode)
+        [ $# -ge 2 ] || om_die "--mode needs a value (no-mistakes | direct-PR | local-only, each optionally +yolo)"
+        mode="$2"; shift 2 ;;
       *) om_die "unknown argument: $1" ;;
     esac
   done
@@ -87,10 +93,17 @@ cmd_add() {
   if ! grep -q "^| $name |" "$REGISTRY" 2>/dev/null; then
     printf '| %s | %s | %s |\n' "$name" "$mode" "$origin" >> "$REGISTRY"
   fi
+  # Assigned, not interpolated into echo. cmd_default_branch can om_die, and
+  # `exit 1` inside $( ) ends only the substitution's subshell — echo still
+  # succeeds, so the script printed `default_branch=` and carried on as if the
+  # project were fine. As the whole right-hand side of an assignment, the same
+  # failure does stop the script.
+  local default_branch
+  default_branch="$(cmd_default_branch "$name")"
   echo "project=$name"
   echo "path=$dest"
   echo "mode=$mode"
-  echo "default_branch=$(cmd_default_branch "$name")"
+  echo "default_branch=$default_branch"
 }
 
 cmd_list() {
@@ -103,7 +116,14 @@ cmd_mode() {
   [ -n "$name" ] || om_die "usage: om-project.sh mode <project> [<mode>]"
   registry_init
   if [ -z "$mode" ]; then
-    grep "^| $name |" "$REGISTRY" | awk -F'|' '{gsub(/ /,"",$3); print $3}'
+    # An unregistered project makes grep exit 1, pipefail carries it to the
+    # pipeline, and set -e killed cmd_mode before `return 0` — rc=1, no output,
+    # no message, indistinguishable from a project whose mode is empty. The
+    # read path is the only one that had no om_die guard; now it has one.
+    local row
+    row="$(grep "^| $name |" "$REGISTRY" 2>/dev/null)" \
+      || om_die "unknown project: $name"
+    printf '%s\n' "$row" | awk -F'|' '{gsub(/ /,"",$3); print $3}'
     return 0
   fi
   valid_mode "$mode" || om_die "invalid mode: $mode"

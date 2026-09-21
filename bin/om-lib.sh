@@ -86,13 +86,22 @@ om_next_id() {
 # Reads one field out of a task's meta record. Meta is flat key=value so that
 # both bash and an agent reading the raw file get the same answer.
 om_meta_get() {
-  local id="$1" key="$2" file="$OM_STATE/$1.meta"
+  local id="$1" key="$2" file="$OM_STATE/$1.meta" value
   [ -f "$file" ] || return 1
   # tail -1, not head -1. om_meta_set rewrites in place, so a well-formed
   # record holds each key once — but anything that appends instead (a hand
   # edit, an agent with a file tool) leaves the older value on top, and a
   # reader that takes the first one silently reports stale state. Last wins.
-  sed -n "s/^${key}=//p" "$file" | tail -1
+  value="$(sed -n "s/^${key}=//p" "$file" | tail -1)"
+  # A MISSING KEY must fail, not succeed with nothing. Every caller writes
+  # `om_meta_get <id> <key> || echo <default>`, and while this returned 0 for a
+  # key that was not there, every one of those defaults was dead code: the
+  # caller got the empty string and carried on with it. Measured consequence —
+  # a record missing its `base=` line drove the landed-work test to
+  # "no ref to compare against" and called merged work unlanded, which is the
+  # permanently-un-tearable failure 46b291b was supposed to have closed.
+  [ -n "$value" ] || return 1
+  printf '%s\n' "$value"
 }
 
 om_meta_set() {
@@ -101,6 +110,35 @@ om_meta_set() {
   if [ -f "$file" ]; then grep -v "^${key}=" "$file" > "$tmp" || true; fi
   printf '%s=%s\n' "$key" "$value" >> "$tmp"
   mv "$tmp" "$file"
+}
+
+# Counts a worktree's uncommitted and untracked files, or fails.
+#
+# `git status --porcelain | wc -l` looks harmless and is not: git exits 128 when
+# the directory exists but is not a working tree (a dangling .git file, a
+# worktree whose clone was removed), 2>/dev/null hides the message, pipefail
+# promotes the 128 to the pipeline, and the plain assignment takes the whole
+# script down under set -e. Measured: om-teardown.sh --check printed NOTHING and
+# returned 128 on such a fixture — the verdict its caller depends on never
+# appeared at all. Callers must decide what a broken worktree means; that is not
+# a decision to make inside a counter.
+#
+# Prints the count and returns 0, or prints nothing and returns 1.
+om_worktree_dirty_count() {
+  local wt="$1" out
+  git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 1
+  out="$(git -C "$wt" status --porcelain -uall 2>/dev/null)" || return 1
+  # No `grep -c` here, and that is the second lesson from the same audit: on a
+  # CLEAN worktree the output is empty, grep matches nothing, and grep exits 1 —
+  # which pipefail hands back as "this worktree is unreadable". The first
+  # version of this very function had that bug and made every clean teardown
+  # refuse. An empty string is zero lines; say so directly.
+  if [ -z "$out" ]; then
+    printf '0\n'
+  else
+    # printf adds exactly one trailing newline, which is what wc -l counts by.
+    printf '%s\n' "$out" | wc -l | tr -d ' '
+  fi
 }
 
 om_task_ids() {
