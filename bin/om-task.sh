@@ -41,8 +41,18 @@ cmd_new() {
   # A crewmate starts from current upstream, not from whatever this clone last
   # saw. A fetch that cannot reach the network is not fatal: the worktree is
   # still cut, and the brief says which base it got.
+  # --prune, and then re-derive origin/HEAD. Both matter, and the second one is
+  # the easy miss: a plain fetch leaves a remote-tracking ref standing after its
+  # branch is gone upstream, and origin/HEAD keeps pointing at it. That is not
+  # an edge case — every merged pull request deletes its branch, and when the
+  # deleted one happened to be the clone's default, the next task cuts its
+  # worktree from a ref nothing upstream has any more. `remote set-head -a` asks
+  # the remote what its default actually is now.
   local fetched=no
-  if git -C "$ppath" fetch --quiet origin 2>/dev/null; then fetched=yes; fi
+  if git -C "$ppath" fetch --quiet --prune origin 2>/dev/null; then
+    fetched=yes
+    git -C "$ppath" remote set-head origin -a >/dev/null 2>&1 || true
+  fi
   # Two names for one thing, and they are not interchangeable. `base` is the
   # plain branch name ("main") — that is what gets recorded, and what later
   # comparisons build "origin/<base>" out of. `base_ref` is what the worktree
